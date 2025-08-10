@@ -1,4 +1,4 @@
-<# 
+<#
 .SYNOPSIS
 
 Invoke-RPCMap can be used to enumerate local and remote RPC services/ports via the RPC Endpoint Mapper
@@ -7,9 +7,9 @@ service.
 .DESCRIPTION
 
 Invoke-RPCMap can be used to enumerate local and remote RPC services/ports via the RPC Endpoint Mapper
-service. 
+service.
 
-This information can useful during an investigation where a connection to a remote port is known, but 
+This information can useful during an investigation where a connection to a remote port is known, but
 the service is running under a generic process like svchost.exe.
 
 This script will do the following:
@@ -116,20 +116,20 @@ Function Invoke-RPCMap
 
 
             // Returns a dictionary of <Uuid, port>
-            public static Dictionary<int, string> QueryEPM(string host)
+            public static Dictionary<string, List<int>> QueryEPM(string host)
             {
-                Dictionary<int, string> ports_and_uuids = new Dictionary<int, string>();
-                int retCode = 0; // RPC_S_OK 
-                               
+                Dictionary<string, List<int>> ports_and_uuids = new Dictionary<string, List<int>>();
+                int retCode = 0; // RPC_S_OK
+
                 IntPtr bindingHandle = IntPtr.Zero;
-                IntPtr inquiryContext = IntPtr.Zero;                
+                IntPtr inquiryContext = IntPtr.Zero;
                 IntPtr elementBindingHandle = IntPtr.Zero;
                 RPC_IF_ID elementIfId;
                 Guid elementUuid;
                 IntPtr elementAnnotation;
 
                 try
-                {                    
+                {
                     retCode = RpcBindingFromStringBinding("ncacn_ip_tcp:" + host, out bindingHandle);
                     if (retCode != 0)
                         throw new Exception("RpcBindingFromStringBinding: " + retCode);
@@ -137,11 +137,11 @@ Function Invoke-RPCMap
                     retCode = RpcMgmtEpEltInqBegin(bindingHandle, 0, 0, 0, string.Empty, out inquiryContext);
                     if (retCode != 0)
                         throw new Exception("RpcMgmtEpEltInqBegin: " + retCode);
-                    
+
                     do
                     {
                         IntPtr bindString = IntPtr.Zero;
-                        retCode = RpcMgmtEpEltInqNext (inquiryContext, out elementIfId, out elementBindingHandle, out elementUuid, out elementAnnotation);
+                        retCode = RpcMgmtEpEltInqNext(inquiryContext, out elementIfId, out elementBindingHandle, out elementUuid, out elementAnnotation);
                         if (retCode != 0)
                             if (retCode == 1772)
                                 break;
@@ -149,18 +149,25 @@ Function Invoke-RPCMap
                         retCode = RpcBindingToStringBinding(elementBindingHandle, out bindString);
                         if (retCode != 0)
                             throw new Exception("RpcBindingToStringBinding: " + retCode);
-                            
+
                         string s = Marshal.PtrToStringAuto(bindString).Trim().ToLower();
-                        if(s.StartsWith("ncacn_ip_tcp:"))
-                            if (ports_and_uuids.ContainsKey(int.Parse(s.Split('[')[1].Split(']')[0])) == false) ports_and_uuids.Add(int.Parse(s.Split('[')[1].Split(']')[0]), elementIfId.Uuid.ToString());
-                           
+                        if (s.StartsWith("ncacn_ip_tcp:"))
+                            if (ports_and_uuids.ContainsKey(elementIfId.Uuid.ToString()))
+                            {
+                                ports_and_uuids[elementIfId.Uuid.ToString()].Add(int.Parse(s.Split('[')[1].Split(']')[0]));
+                            }
+                            else
+                            {
+                                ports_and_uuids.Add(elementIfId.Uuid.ToString(), new List<int>() { int.Parse(s.Split('[')[1].Split(']')[0]) });
+                            }
+
                         RpcBindingFree(ref elementBindingHandle);
-                        
+
                     }
                     while (retCode != 1772); // RPC_X_NO_MORE_ENTRIES
 
                 }
-                catch(Exception ex)
+                catch (Exception ex)
                 {
                     Console.WriteLine(ex);
                     return ports_and_uuids;
@@ -169,7 +176,7 @@ Function Invoke-RPCMap
                 {
                     RpcBindingFree(ref bindingHandle);
                 }
-                
+
                 return ports_and_uuids;
             }
         }
@@ -177,19 +184,19 @@ Function Invoke-RPCMap
     }
     PROCESS
     {
- 
+
         [Bool]$EPMOpen = $False
         [Bool]$bolResult = $False
         $Socket = New-Object Net.Sockets.TcpClient
-                
+
         Try
-        {                    
+        {
             $Socket.Connect($ComputerName, 135)
             If ($Socket.Connected)
             {
                 $EPMOpen = $True
             }
-            $Socket.Close()                    
+            $Socket.Close()
         }
         Catch
         {
@@ -201,18 +208,18 @@ Function Invoke-RPCMap
             Write-Host "$ComputerName" -ForegroundColor Red
             ""
         }
-                
+
         If ($EPMOpen)
         {
             Add-Type $PInvokeCode
-            
+
             # Build the UUID Mapping hash table - RW
             $uuidMapping = @{
                 "51a227ae-825b-41f2-b4a9-1ac9557a1018" = "Ngc Pop Key Service"
                 "367abb81-9844-35f1-ad32-98f038001003" = "Service Control Manager/Services"
                 "12345678-1234-abcd-ef00-0123456789ab" = "Printer Spooler Service"
                 "f6beaff7-1e19-4fbb-9f8f-b89e2018337c" = "Event Log TCPIP"
-                "86d35949-83c9-4044-b424-db363231fd0c" = "Task Scheduler Service" 
+                "86d35949-83c9-4044-b424-db363231fd0c" = "Task Scheduler Service"
                 "d95afe70-a6d5-4259-822e-2c84da1ddb0d" = "WindowsShutdown Interface"
                 "3c4728c5-f0ab-448b-bda1-6ce01eb0a6d5" = "DHCP Client LRPC Endpoint"
                 "3c4728c5-f0ab-448b-bda1-6ce01eb0a6d6" = "DHCPv6 Client LRPC Endpoint"
@@ -237,11 +244,15 @@ Function Invoke-RPCMap
                 "fb9a3757-cff0-4db0-b9fc-bd6c131612fd" = "AppInfo"
                 "fd7a0523-dc70-43dd-9b2e-9c5ed48225b1" = "AppInfo"
                 "6b5bdd1e-528c-422c-af8c-a4079be4fe48" = "Windows Firewall Remote Service"
+                "897e2e5f-93f3-4376-9c9c-fd2277495c27" = "DFS-R replication Interface"
+                "76f03f96-cdfd-44fc-a22c-64950a001209" = "IRemoteWinspool Server"
+                "50abc2a4-574d-40b3-9d66-ee4fd5fba076" = "DNS Server"
+                "3a9ef155-691d-4449-8d05-09ad57031823" = "Task Scheduler Service"
+                "ae33069b-a2a8-46ee-a235-ddfd339be281" = "Print System Asynchronous Notification"
             }
 
             # Dictionary <Uuid, Port>
             $RPC_ports_and_uuids = [Rpc]::QueryEPM($Computer)
-            $PortDeDup = ($RPC_ports_and_uuids.Keys) | Sort-Object -Unique
             # Write the hostname, ports, and uuids - RW
             ""
             "+-------------------------------------------------------------------------------------------------------------+"
@@ -252,51 +263,28 @@ Function Invoke-RPCMap
             # Initialize the new hash table to store the results of the scan results vs uuid mapping - RW
             $enrichedResults = @{}
             # Search the results for matches in the RPC port and uuid hash table
-            foreach ($port in $RPC_ports_and_uuids.Keys) {
+            foreach ($uuid in $RPC_ports_and_uuids.Keys) {
                 # Grab just the uuid from the hash table via port key
-                $uuid = $RPC_ports_and_uuids.Item($port)
                 # Now query the uuidMapping for a match
                 if ($uuidMapping.ContainsKey($uuid)) {
                     # There was a match, now create a new hash table with the updated informaton
                     # Associate the uuid with the name
                     $mappingResultName = $uuidMapping.Item($uuid)
                     # Add the results to the new enriched results hash table
-                    $enrichedResults.Add($port, $uuid + " (" + "$mappingResultName" + ")")
+                    $enrichedResults.Add($uuid + " (" + "$mappingResultName" + ")",($RPC_ports_and_uuids[$uuid] -join ", "))
                 } else {
                     # There was not a match to the uuid mapping
                     # Add the port and uuid from the original RPC port and uuid hash table
-                    $enrichedResults.Add($port, $uuid)
+                    $enrichedResults.Add($uuid,($RPC_ports_and_uuids[$uuid] -join ", "))
                 }
             }
             Write-Output "Results:"
             # Format the results
-            $enrichedResults.Keys | Select @{l='Port';e={$_}},@{l='UUID (Service name)';e={$enrichedResults.$_}} | out-host
-            
-            # Blocked out to save time since we don't care of the ports are actually open - RW
-            <#
-            Foreach ($Port In $PortDeDup)
-            {
-                $Socket = New-Object Net.Sockets.TcpClient
-                Try
-                {
-                    $Socket.Connect($Computer, $Port)
-                    If ($Socket.Connected)
-                    {
-                        Write-Output "$Port Reachable"
-                    }
-                    $Socket.Close()
-                }
-                Catch
-                {
-                    Write-Output "$Port Unreachable"
-                    $Socket.Dispose()
-                }
-
-            } #>
+            $enrichedResults.Keys | Select @{l='UUID (Service Name)';e={$_}},@{l='Port(s)';e={$enrichedResults.$_}} | out-host
 
         }
 
-  
+
     }
 
     END
